@@ -222,6 +222,10 @@ public class CameraRollManager extends ReactContextBaseJavaModule {
    *            mimeType (optional): restrict returned images to a specific mimetype (e.g.
    *            image/jpeg)
    *          </li>
+   *          <li>
+   *            assetType (optional): chooses between either photos or videos from the camera roll.
+   *            Valid values are "Photos" or "Videos". Defaults to photos.
+   *          </li>
    *        </ul>
    * @param promise the Promise to be resolved when the photos are loaded; for a format of the
    *        parameters passed to this callback, see {@code getPhotosReturnChecker} in CameraRoll.js
