@@ -525,6 +525,10 @@ void YGNodeCopyStyle(const YGNodeRef dstNode, const YGNodeRef srcNode) {
 }
 
 static inline float YGResolveFlexGrow(const YGNodeRef node) {
+  // Root nodes flexGrow should always be 0
+  if (node->parent == NULL) {
+    return 0.0;
+  }
   if (!YGFloatIsUndefined(node->style.flexGrow)) {
     return node->style.flexGrow;
   }
@@ -545,6 +549,10 @@ float YGNodeStyleGetFlexShrink(const YGNodeRef node) {
 }
 
 static inline float YGNodeResolveFlexShrink(const YGNodeRef node) {
+  // Root nodes flexShrink should always be 0
+  if (node->parent == NULL) {
+    return 0.0;
+  }
   if (!YGFloatIsUndefined(node->style.flexShrink)) {
     return node->style.flexShrink;
   }
@@ -866,7 +874,7 @@ static void YGPrintEdgeIfNotUndefined(const YGNodeRef node,
                                       const char *str,
                                       const YGValue *edges,
                                       const YGEdge edge) {
-  YGPrintNumberIfNotUndefined(node, str, YGComputedEdgeValue(edges, YGEdgeLeft, &YGValueUndefined));
+  YGPrintNumberIfNotUndefined(node, str, YGComputedEdgeValue(edges, edge, &YGValueUndefined));
 }
 
 static void YGPrintNumberIfNotZero(const YGNodeRef node,
@@ -1679,7 +1687,8 @@ static void YGNodeAbsoluteLayoutChild(const YGNodeRef node,
     child->layout.position[leading[mainAxis]] = node->layout.measuredDimensions[dim[mainAxis]] -
                                                 child->layout.measuredDimensions[dim[mainAxis]] -
                                                 YGNodeTrailingBorder(node, mainAxis) -
-                                                YGNodeTrailingPosition(child, mainAxis, width);
+                                                YGNodeTrailingMargin(child, mainAxis, width) -
+                                                YGNodeTrailingPosition(child, mainAxis, isMainAxisRow ? width : height);
   } else if (!YGNodeIsLeadingPosDefined(child, mainAxis) &&
              node->style.justifyContent == YGJustifyCenter) {
     child->layout.position[leading[mainAxis]] = (node->layout.measuredDimensions[dim[mainAxis]] -
@@ -1696,7 +1705,8 @@ static void YGNodeAbsoluteLayoutChild(const YGNodeRef node,
     child->layout.position[leading[crossAxis]] = node->layout.measuredDimensions[dim[crossAxis]] -
                                                  child->layout.measuredDimensions[dim[crossAxis]] -
                                                  YGNodeTrailingBorder(node, crossAxis) -
-                                                 YGNodeTrailingPosition(child, crossAxis, width);
+                                                 YGNodeTrailingMargin(child, crossAxis, width) -
+                                                 YGNodeTrailingPosition(child, crossAxis, isMainAxisRow ? height : width);
   } else if (!YGNodeIsLeadingPosDefined(child, crossAxis) &&
              YGNodeAlignItem(node, child) == YGAlignCenter) {
     child->layout.position[leading[crossAxis]] =
@@ -1726,8 +1736,13 @@ static void YGNodeWithMeasureFuncSetMeasuredDimensions(const YGNodeRef node,
   const float marginAxisRow = YGNodeMarginForAxis(node, YGFlexDirectionRow, availableWidth);
   const float marginAxisColumn = YGNodeMarginForAxis(node, YGFlexDirectionColumn, availableWidth);
 
-  const float innerWidth = availableWidth - marginAxisRow - paddingAndBorderAxisRow;
-  const float innerHeight = availableHeight - marginAxisColumn - paddingAndBorderAxisColumn;
+  // We want to make sure we don't call measure with negative size
+  const float innerWidth = YGFloatIsUndefined(availableWidth)
+                            ? availableWidth
+                            : fmaxf(0, availableWidth - marginAxisRow - paddingAndBorderAxisRow);
+  const float innerHeight = YGFloatIsUndefined(availableHeight)
+                            ? availableHeight
+                            : fmaxf(0, availableHeight - marginAxisColumn - paddingAndBorderAxisColumn);
 
   if (widthMeasureMode == YGMeasureModeExactly && heightMeasureMode == YGMeasureModeExactly) {
     // Don't bother sizing the text if both dimensions are already defined.
@@ -2293,7 +2308,7 @@ static void YGNodelayoutImpl(const YGNodeRef node,
         if (!node->config->useLegacyStretchBehaviour &&
             (totalFlexGrowFactors == 0 || YGResolveFlexGrow(node) == 0)) {
           // If we don't have any children to flex or we can't flex the node itself,
-          // space we've used is all space we need
+          // space we've used is all space we need. Root node also should be shrunk to minimum
           availableInnerMainDim = sizeConsumedOnCurrentLine;
         }
       }
@@ -3129,6 +3144,25 @@ static inline bool YGMeasureModeNewMeasureSizeIsStricterAndStillValid(YGMeasureM
          lastSize > size && (lastComputedSize <= size || YGFloatsEqual(size, lastComputedSize));
 }
 
+static float YGRoundValueToPixelGrid(const float value,
+                                     const float pointScaleFactor,
+                                     const bool forceCeil,
+                                     const bool forceFloor) {
+  float fractial = fmodf(value, pointScaleFactor);
+  if (YGFloatsEqual(fractial, 0)) {
+    // Still remove fractial as fractial could be  extremely small.
+    return value - fractial;
+  }
+  
+  if (forceCeil) {
+    return value - fractial + pointScaleFactor;
+  } else if (forceFloor) {
+    return value - fractial;
+  } else {
+    return value - fractial + (fractial >= pointScaleFactor / 2.0f ? pointScaleFactor : 0);
+  }
+}
+
 bool YGNodeCanUseCachedMeasurement(const YGMeasureMode widthMode,
                                    const float width,
                                    const YGMeasureMode heightMode,
@@ -3140,13 +3174,19 @@ bool YGNodeCanUseCachedMeasurement(const YGMeasureMode widthMode,
                                    const float lastComputedWidth,
                                    const float lastComputedHeight,
                                    const float marginRow,
-                                   const float marginColumn) {
+                                   const float marginColumn,
+                                   const YGConfigRef config) {
   if (lastComputedHeight < 0 || lastComputedWidth < 0) {
     return false;
   }
+  bool useRoundedComparison = config != NULL && config->pointScaleFactor != 0;
+  const float effectiveWidth = useRoundedComparison ? YGRoundValueToPixelGrid(width, config->pointScaleFactor, false, false) : width;
+  const float effectiveHeight = useRoundedComparison ? YGRoundValueToPixelGrid(height, config->pointScaleFactor, false, false) : height;
+  const float effectiveLastWidth = useRoundedComparison ? YGRoundValueToPixelGrid(lastWidth, config->pointScaleFactor, false, false) : lastWidth;
+  const float effectiveLastHeight = useRoundedComparison ? YGRoundValueToPixelGrid(lastHeight, config->pointScaleFactor, false, false) : lastHeight;
 
-  const bool hasSameWidthSpec = lastWidthMode == widthMode && YGFloatsEqual(lastWidth, width);
-  const bool hasSameHeightSpec = lastHeightMode == heightMode && YGFloatsEqual(lastHeight, height);
+  const bool hasSameWidthSpec = lastWidthMode == widthMode && YGFloatsEqual(effectiveLastWidth, effectiveWidth);
+  const bool hasSameHeightSpec = lastHeightMode == heightMode && YGFloatsEqual(effectiveLastHeight, effectiveHeight);
 
   const bool widthIsCompatible =
       hasSameWidthSpec || YGMeasureModeSizeIsExactAndMatchesOldMeasuredSize(widthMode,
@@ -3239,7 +3279,8 @@ bool YGLayoutNodeInternal(const YGNodeRef node,
                                       layout->cachedLayout.computedWidth,
                                       layout->cachedLayout.computedHeight,
                                       marginAxisRow,
-                                      marginAxisColumn)) {
+                                      marginAxisColumn,
+                                      config)) {
       cachedResults = &layout->cachedLayout;
     } else {
       // Try to use the measurement cache.
@@ -3255,7 +3296,8 @@ bool YGLayoutNodeInternal(const YGNodeRef node,
                                           layout->cachedMeasurements[i].computedWidth,
                                           layout->cachedMeasurements[i].computedHeight,
                                           marginAxisRow,
-                                          marginAxisColumn)) {
+                                          marginAxisColumn,
+                                          config)) {
           cachedResults = &layout->cachedMeasurements[i];
           break;
         }
@@ -3386,25 +3428,6 @@ void YGConfigSetPointScaleFactor(const YGConfigRef config, const float pixelsInP
     config->pointScaleFactor = 0.0f;
   } else {
     config->pointScaleFactor = 1.0f / pixelsInPoint;
-  }
-}
-
-static float YGRoundValueToPixelGrid(const float value,
-                                     const float pointScaleFactor,
-                                     const bool forceCeil,
-                                     const bool forceFloor) {
-  float fractial = fmodf(value, pointScaleFactor);
-  if (YGFloatsEqual(fractial, 0)) {
-    // Still remove fractial as fractial could be  extremely small.
-    return value - fractial;
-  }
-
-  if (forceCeil) {
-    return value - fractial + pointScaleFactor;
-  } else if (forceFloor) {
-    return value - fractial;
-  } else {
-    return value - fractial + (fractial >= pointScaleFactor / 2.0f ? pointScaleFactor : 0);
   }
 }
 
