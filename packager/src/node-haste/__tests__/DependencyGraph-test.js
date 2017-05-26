@@ -15,7 +15,7 @@ jest.useRealTimers();
 jest
   .mock('fs')
   .mock('../../Logger')
-  .mock('../../lib/TransformCache')
+  .mock('../../lib/TransformCaching')
   // It's noticeably faster to prevent running watchman from FileWatcher.
   .mock('child_process', () => ({}));
 
@@ -96,7 +96,7 @@ describe('DependencyGraph', function() {
       useWatchman: false,
       ignoreFilePath: () => false,
       maxWorkerCount: 1,
-      moduleOptions: {},
+      moduleOptions: {transformCache: require('TransformCaching').mocked()},
       resetCache: true,
       transformCode: (module, sourceCode, transformOptions) => {
         return new Promise(resolve => {
@@ -1127,14 +1127,13 @@ describe('DependencyGraph', function() {
 
       return dgraph.catch(err => {
         expect(err.message).toEqual(
-          `Failed to build DependencyGraph: @providesModule naming collision:\n` +
+          'jest-haste-map: @providesModule naming collision:\n' +
             `  Duplicate module name: index\n` +
             `  Paths: /root/b.js collides with /root/index.js\n\n` +
             'This error is caused by a @providesModule declaration ' +
             'with the same name across two different files.',
         );
-        expect(err.type).toEqual('DependencyGraphError');
-        expect(console.warn).toBeCalled();
+        expect(console.warn).not.toBeCalled();
       });
     });
 
@@ -5398,7 +5397,7 @@ describe('DependencyGraph', function() {
         });
     });
 
-    it('should recover from multiple modules with the same name (but this is broken right now)', async () => {
+    it('should recover from multiple modules with the same name', async () => {
       const root = '/root';
       console.warn = jest.fn();
       const filesystem = setMockFileSystem({
@@ -5435,17 +5434,11 @@ describe('DependencyGraph', function() {
         await triggerAndProcessWatchEvent(dgraph, 'change', root + '/b.js');
       }
 
-      // This verifies that it is broken right now. Instead of throwing it should
-      // return correct results. Once this is fixed in `jest-haste`, remove
-      // the whole try catch and verify results are matching a snapshot.
-      try {
-        await getOrderedDependenciesAsJSON(dgraph, root + '/index.js');
-        throw new Error('expected `getOrderedDependenciesAsJSON` to fail');
-      } catch (error) {
-        if (error.type !== 'UnableToResolveError') {
-          throw error;
-        }
-      }
+      const deps = await getOrderedDependenciesAsJSON(
+        dgraph,
+        root + '/index.js',
+      );
+      expect(deps).toMatchSnapshot();
     });
   });
 

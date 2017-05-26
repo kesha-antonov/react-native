@@ -12,6 +12,7 @@
 'use strict';
 
 const Logger = require('./src/Logger');
+const TransformCaching = require('./src/lib/TransformCaching');
 
 const debug = require('debug');
 const invariant = require('fbjs/lib/invariant');
@@ -19,6 +20,7 @@ const invariant = require('fbjs/lib/invariant');
 import type {PostProcessModules, PostMinifyProcess} from './src/Bundler';
 import type Server from './src/Server';
 import type {GlobalTransformCache} from './src/lib/GlobalTransformCache';
+import type {TransformCache} from './src/lib/TransformCaching';
 import type {Reporter} from './src/lib/reporting';
 import type {HasteImpl} from './src/node-haste/Module';
 
@@ -34,6 +36,7 @@ type Options = {
   projectRoots: $ReadOnlyArray<string>,
   reporter?: Reporter,
   +sourceExts: ?Array<string>,
+  +transformCache: TransformCache,
   +transformModulePath: string,
   watch?: boolean,
 };
@@ -50,6 +53,8 @@ type PublicBundleOptions = {
   +runModule?: boolean,
   +sourceMapUrl?: string,
 };
+
+exports.TransformCaching = TransformCaching;
 
 /**
  * This is a public API, so we don't trust the value and purposefully downgrade
@@ -118,6 +123,9 @@ function createServer(options: StrictOptions): Server {
 
   // Some callsites may not be Flowified yet.
   invariant(options.reporter != null, 'createServer() requires reporter');
+  if (options.transformCache == null) {
+    options.transformCache = TransformCaching.useTempDir();
+  }
   const serverOptions = Object.assign({}, options);
   delete serverOptions.verbose;
   const ServerClass = require('./src/Server');

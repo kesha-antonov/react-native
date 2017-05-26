@@ -39,7 +39,7 @@ import type {
   Options as JSTransformerOptions,
 } from '../JSTransformer/worker/worker';
 import type {GlobalTransformCache} from '../lib/GlobalTransformCache';
-import type {GetTransformCacheKey} from '../lib/TransformCache';
+import type {GetTransformCacheKey} from '../lib/TransformCaching';
 import type {Reporter} from '../lib/reporting';
 import type {ModuleMap} from './DependencyGraph/ResolutionRequest';
 import type {Options as ModuleOptions, TransformCode} from './Module';
@@ -111,7 +111,7 @@ class DependencyGraph extends EventEmitter {
     return new JestHasteMap({
       extensions: opts.sourceExts.concat(opts.assetExts),
       forceNodeFilesystemAPI: opts.forceNodeFilesystemAPI,
-      ignorePattern: {test: opts.ignoreFilePath},
+      ignorePattern: opts.ignoreFilePath,
       maxWorkers: opts.maxWorkerCount,
       mocksPattern: '',
       name: 'react-native-packager-' + JEST_HASTE_MAP_CACHE_BREAKER,
@@ -120,6 +120,7 @@ class DependencyGraph extends EventEmitter {
       resetCache: opts.resetCache,
       retainAllFiles: true,
       roots: opts.roots,
+      throwOnModuleCollision: true,
       useWatchman: opts.useWatchman,
       watch: opts.watch,
     });
